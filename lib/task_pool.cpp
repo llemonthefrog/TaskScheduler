@@ -1,9 +1,9 @@
 #include "task_pool.h"
 
-void TaskPool::EnqueueTask(std::shared_ptr<BaseTask> task) {
+void TaskPool::EnqueueTask(std::shared_ptr<BaseTask>&& task) {
     {
         std::unique_lock<std::mutex> lock(queue_mutex);
-        tasks.push(task);
+        tasks.push(std::move(task));
     }
     cv_task.notify_one();
 }

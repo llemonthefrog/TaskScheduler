@@ -275,7 +275,7 @@ public:
             std::lock_guard<std::mutex> lock(sched_mutex);
             for (int i = 0; i < next_id; ++i) {
                 if (in_degree[i] == 0) {
-                    pool.EnqueueTask(std::make_shared<DependentTask>(i, this));
+                    pool.EnqueueTask(std::move(std::make_shared<DependentTask>(i, this)));
                 }
             }
         }

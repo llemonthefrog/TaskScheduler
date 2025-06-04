@@ -8,7 +8,7 @@ void DependentTask::Execute() {
         for (int child : scheduler->out_edges[id]) {
             scheduler->in_degree[child]--;
             if (scheduler->in_degree[child] == 0) {
-                scheduler->pool.EnqueueTask(std::make_shared<DependentTask>(child, scheduler));
+                scheduler->pool.EnqueueTask(std::move(std::make_shared<DependentTask>(child, scheduler)));
             }
         }
     }
@@ -23,7 +23,7 @@ void TTaskScheduler::executeAll() {
         std::lock_guard<std::mutex> lock(sched_mutex);
         for (int id = 0; id < next_id; ++id) {
             if (in_degree[id] == 0) {
-                pool.EnqueueTask(std::make_shared<DependentTask>(id, this));
+                pool.EnqueueTask(std::move(std::make_shared<DependentTask>(id, this)));
             }
         }
     }

@@ -27,7 +27,7 @@ public:
         Stop();
     }
 
-    void EnqueueTask(std::shared_ptr<BaseTask> task);
+    void EnqueueTask(std::shared_ptr<BaseTask>&& task);
     void WaitIdle();
     void Stop();
 
