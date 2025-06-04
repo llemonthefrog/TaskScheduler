@@ -5,6 +5,8 @@
 
 #include <cctype>
 #include <optional>
+#include <thread>
+#include <chrono>
 
 auto sum = [](const std::vector<int>& vctr) {
     int sum = 0;
@@ -90,4 +92,46 @@ TEST(ComplexTest, DAG) {
         scheduler.getFutureResult<int>(id3), scheduler.getFutureResult<int>(id4)); // 90
 
     ASSERT_THAT(scheduler.getResult<int>(id5), 90);
+}
+
+TEST(ComplexTest, LongTaskImitating) {
+    using namespace std::chrono_literals;
+
+    TTaskScheduler scheduler;
+
+    int id1 = scheduler.add([](int a) { 
+        std::this_thread::sleep_for(1000ms);
+        return a;
+    }, 10);
+
+    int id2 = scheduler.add([](int a) { 
+        std::this_thread::sleep_for(1000ms);
+        return a;
+    }, 10);
+
+    int id3 = scheduler.add([](int a) { 
+        std::this_thread::sleep_for(1000ms);
+        return a;
+    }, 10);
+
+    int id4 = scheduler.add([](int a) { 
+        std::this_thread::sleep_for(1000ms);
+        return a;
+    }, 10);
+
+    int id5 = scheduler.add([](int a, int b) { return a + b; },
+        scheduler.getFutureResult<int>(id1), scheduler.getFutureResult<int>(id2)); 
+
+    int id6 = scheduler.add([](int a, int b) { return a + b; },
+        scheduler.getFutureResult<int>(id3), scheduler.getFutureResult<int>(id4)); 
+
+    int id7 = scheduler.add([](int a, int b) { return a + b; },
+        scheduler.getFutureResult<int>(id5), scheduler.getFutureResult<int>(id6)); // 40
+
+     
+    const auto start = std::chrono::high_resolution_clock::now();
+    scheduler.getResult<int>(id7);
+    const auto end = std::chrono::high_resolution_clock::now();
+    const std::chrono::duration<double, std::milli> elapsed = end - start;
+    ASSERT_LT(elapsed, 1101ms);
 }

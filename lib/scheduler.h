@@ -29,7 +29,6 @@ public:
     DependentTask(int id_, TTaskScheduler* sch) : id(id_), scheduler(sch) {}
     void Execute();
 };
-    
 
 template<typename T>
 struct Promise {
