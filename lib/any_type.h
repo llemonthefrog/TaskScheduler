@@ -120,7 +120,7 @@ public:
 template<typename T>
 T any_cast(const AnyType& any) {
     if(!any.has_value() || type_id<my_decay_t<T>>() != any.type()) {
-        throw std::bad_cast("bad cast");
+        throw std::runtime_error("bad cast");
     }
 
     auto* ptr = dynamic_cast<AnyType::Holder<my_decay_t<T>>*>(any.holder_.get());

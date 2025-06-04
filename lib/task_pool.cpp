@@ -29,7 +29,7 @@ void TaskPool::Stop() {
     }
 }
 
-void TaskPool::init_worker() {
+void TaskPool::InitWorker() {
     while(true) {
         std::shared_ptr<BaseTask> task;
 

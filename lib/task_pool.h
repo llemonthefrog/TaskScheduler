@@ -19,7 +19,7 @@ class TaskPool final {
 public:
     TaskPool(size_t workers_size) : tasks_in_progress(0) {
         for(int i = 0; i < workers_size; i++) {
-            workers.emplace_back([this]() { init_worker(); });
+            workers.emplace_back([this]() { InitWorker(); });
         }
     }
 
@@ -32,7 +32,7 @@ public:
     void Stop();
 
 private:
-    void init_worker();
+    void InitWorker();
 
     std::vector<std::thread> workers;
 

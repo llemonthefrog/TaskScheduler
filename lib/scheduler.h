@@ -4,11 +4,8 @@
 #include <queue>
 #include <vector>
 #include <cinttypes>
-#include <functional>
 #include <mutex>
 #include <atomic>
-#include <thread>
-#include <condition_variable>
 #include <memory>
 
 #include "any_type.h"
@@ -33,6 +30,7 @@ public:
     void Execute();
 };
     
+
 template<typename T>
 struct Promise {
     explicit Promise(T val) noexcept : value(val), vertex(nullptr), promised(false), id(-1) {}
@@ -163,18 +161,17 @@ public:
 };
 
 class TTaskScheduler {
-public:
-    std::unordered_map<int, std::shared_ptr<BaseSchedule>> tasks;
-    std::unordered_map<int, std::atomic<int>> in_degree;
+private:
     std::unordered_map<int, std::vector<int>> out_edges;
     std::unordered_map<int, std::atomic<bool>> executed;
+    std::unordered_map<int, std::shared_ptr<BaseSchedule>> tasks;
+    std::unordered_map<int, std::atomic<int>> in_degree;
 
     std::mutex sched_mutex;
-
     TaskPool pool;
 
     int next_id = 0;
-
+    
 public:
     TTaskScheduler() : pool(4) {}
     TTaskScheduler(size_t workes_count) : pool(workes_count) {}
@@ -289,4 +286,6 @@ public:
     }
 
     void executeAll();
+
+    friend DependentTask;
 };
