@@ -1,10 +1,20 @@
 #pragma once
 
 #include <unordered_map>
+#include <queue>
 #include <vector>
-#include <stack>
+#include <cinttypes>
+#include <functional>
+#include <mutex>
+#include <atomic>
+#include <thread>
+#include <condition_variable>
+#include <memory>
 
 #include "any_type.h"
+#include "task_pool.h"
+
+class TTaskScheduler;
 
 class BaseSchedule {
 public:
@@ -13,12 +23,19 @@ public:
     virtual bool has_value() = 0;
     virtual ~BaseSchedule() = default;
 };
+
+class DependentTask : public BaseTask {
+    int id;
+    TTaskScheduler* scheduler;
+
+public:
+    DependentTask(int id_, TTaskScheduler* sch) : id(id_), scheduler(sch) {}
+    void Execute();
+};
     
 template<typename T>
 struct Promise {
-    explicit Promise(T val) noexcept : value(val), vertex(nullptr) {
-        promised = false;
-    }
+    explicit Promise(T val) noexcept : value(val), vertex(nullptr), promised(false), id(-1) {}
 
     explicit Promise(BaseSchedule* vert, int id) noexcept : vertex(vert), id(id) {
         promised = true;
@@ -46,7 +63,7 @@ public:
 
         if(arg_.promised) {
             if (!arg_.vertex->has_value()) {
-                throw "Promised vertex has no value";
+                throw std::runtime_error("Promised vertex has no value");
             }
 
             type data = any_cast<type>(arg_.vertex->result());
@@ -81,7 +98,7 @@ public:
 
         if(arg_left_.promised) {
             if(!arg_left_.vertex->has_value()) {
-                throw "not provided value for left arg";
+                throw std::runtime_error("not provided value for left arg");
             }
 
             left_arg = any_cast<T>(arg_left_.vertex->result());
@@ -91,7 +108,7 @@ public:
 
         if(arg_right_.promised) {
             if(!arg_right_.vertex->has_value()) {
-                throw "not provided value for left arg";
+                throw std::runtime_error("not provided value for left arg");
             }
 
             right_arg = any_cast<U>(arg_right_.vertex->result());
@@ -126,7 +143,7 @@ public:
 
         if(arg_.promised) {
             if (!arg_.vertex->has_value()) {
-                throw "Promised vertex has no value";
+                throw std::runtime_error("Promised vertex has no value");
             }
 
             type data = any_cast<type>(arg_.vertex->result());
@@ -146,42 +163,27 @@ public:
 };
 
 class TTaskScheduler {
-    std::unordered_map<int, std::unique_ptr<BaseSchedule>> tasks;
-    std::unordered_map<int, std::vector<int>> tasks_graph;
+public:
+    std::unordered_map<int, std::shared_ptr<BaseSchedule>> tasks;
+    std::unordered_map<int, std::atomic<int>> in_degree;
+    std::unordered_map<int, std::vector<int>> out_edges;
+    std::unordered_map<int, std::atomic<bool>> executed;
+
+    std::mutex sched_mutex;
+
+    TaskPool pool;
+
     int next_id = 0;
-    
-private:
-    void visit(std::stack<int>& stack, std::vector<bool>& visited, int vertex) {
-        visited[vertex] = true;
-        
-        for(auto& u : tasks_graph[vertex]) {
-            if(!visited[u]) {
-                visit(stack, visited, u);
-            }
-        }
-
-        stack.push(vertex);
-    }
-
-    std::stack<int> top_sort() {
-        std::vector<bool> visited(next_id, false);
-        std::stack<int> stack;
-
-        for(int i = 0; i < next_id; i++) {
-            if(!visited[i]) {
-                visit(stack, visited, i);
-            }
-        }
-        
-        return stack;
-    }
 
 public:
+    TTaskScheduler() : pool(4) {}
+    TTaskScheduler(size_t workes_count) : pool(workes_count) {}
+
     template<typename Functor, typename T>
     int add(Functor func, T val) {
         tasks[next_id] = 
-            std::make_unique<ScheduleOfOne<Functor,T>>(ScheduleOfOne<Functor, T>(func, Promise<T>(val)));
-        tasks_graph[next_id] = {};
+            std::make_shared<ScheduleOfOne<Functor,T>>(ScheduleOfOne<Functor, T>(func, Promise<T>(val)));
+        in_degree[next_id] = 0;
 
         next_id++;
         return next_id - 1;
@@ -190,8 +192,8 @@ public:
     template<typename Functor, typename T, typename U = T>
     int add(Functor func, T val_left, U val_right) {
         tasks[next_id] = 
-            std::make_unique<ScheduleOfTwo<Functor,T,U>>(ScheduleOfTwo<Functor, T, U>(func, Promise<T>(val_left), Promise<U>(val_right)));
-        tasks_graph[next_id] = {};
+            std::make_shared<ScheduleOfTwo<Functor,T,U>>(ScheduleOfTwo<Functor, T, U>(func, Promise<T>(val_left), Promise<U>(val_right)));
+        in_degree[next_id] = 0;
 
         next_id++;
         return next_id - 1;
@@ -200,10 +202,10 @@ public:
     template<typename Functor, typename T>
     int add(Functor func, Promise<T> promise) {
         tasks[next_id] = 
-            std::make_unique<ScheduleOfOne<Functor, T>>(ScheduleOfOne<Functor, T>(func, promise));
-        tasks_graph[next_id] = {};
+            std::make_shared<ScheduleOfOne<Functor, T>>(ScheduleOfOne<Functor, T>(func, promise));
 
-        tasks_graph[promise.id].push_back(next_id);
+        out_edges[promise.id].push_back(next_id);
+        in_degree[next_id] += 1;
 
         next_id++;
         return next_id - 1;
@@ -212,10 +214,10 @@ public:
     template<typename Functor, typename T, typename U = T>
     int add(Functor func, T val, Promise<U> promise) {
         tasks[next_id] = 
-            std::make_unique<ScheduleOfTwo<Functor,T,U>>(ScheduleOfTwo<Functor, T, U>(func, Promise<T>(val), promise));
-        tasks_graph[next_id] = {};
+            std::make_shared<ScheduleOfTwo<Functor,T,U>>(ScheduleOfTwo<Functor, T, U>(func, Promise<T>(val), promise));
 
-        tasks_graph[promise.id].push_back(next_id);
+        out_edges[promise.id].push_back(next_id);
+        in_degree[next_id] += 1;
 
         next_id++;
         return next_id - 1;
@@ -224,12 +226,11 @@ public:
     template<typename Functor, typename T, typename U = T>
     int add(Functor func, Promise<T> promise_right, Promise<U> promise_left) {
         tasks[next_id] = 
-            std::make_unique<ScheduleOfTwo<Functor, T, U>>(ScheduleOfTwo<Functor, T, U>(func, promise_right, promise_left));
-
-        tasks_graph[next_id] = {};
+            std::make_shared<ScheduleOfTwo<Functor, T, U>>(ScheduleOfTwo<Functor, T, U>(func, promise_right, promise_left));
         
-        tasks_graph[promise_left.id].push_back(next_id);
-        tasks_graph[promise_right.id].push_back(next_id);
+        out_edges[promise_left.id].push_back(next_id);
+        out_edges[promise_right.id].push_back(next_id);
+        in_degree[next_id] += 2;
 
         next_id++;
         return next_id - 1;
@@ -238,9 +239,9 @@ public:
     template<typename Class, typename RetType, typename Arg>
     int add(RetType (Class::*func)(Arg), Class obj, Arg val) {
         tasks[next_id] = 
-            std::make_unique<ScheduleOfOneMethod<Class, RetType, Arg>>(
+            std::make_shared<ScheduleOfOneMethod<Class, RetType, Arg>>(
                 ScheduleOfOneMethod<Class, RetType, Arg>(func, obj, Promise<Arg>(val)));
-        tasks_graph[next_id] = {};
+        in_degree[next_id] = 0;
 
         next_id++;
         return next_id - 1;
@@ -249,11 +250,11 @@ public:
     template<typename Class, typename RetType, typename Arg>
     int add(RetType (Class::*func)(Arg), Class obj, Promise<Arg> promise) {
         tasks[next_id] = 
-            std::make_unique<ScheduleOfOneMethod<Class, RetType, Arg>>(
+            std::make_shared<ScheduleOfOneMethod<Class, RetType, Arg>>(
                 ScheduleOfOneMethod<Class, RetType, Arg>(func, obj, promise));
-        tasks_graph[next_id] = {};
 
-        tasks_graph[promise.id].push_back(next_id);
+        out_edges[promise.id].push_back(next_id);
+        in_degree[next_id] += 1;
 
         next_id++;
         return next_id - 1;
@@ -262,7 +263,7 @@ public:
     template<typename T>
     Promise<T> getFutureResult(int id) {
         if(tasks.find(id) == tasks.end()) {
-            throw "there is no task with such id";
+            throw std::runtime_error("there is no task with such id");
         }
 
         return Promise<T>(tasks[id].get(), id);
@@ -270,39 +271,22 @@ public:
 
     template<typename T>
     auto getResult(int id) {
-        if(tasks.find(id) == tasks.end()) {
-            throw "there is no task with such id";
+        if (tasks.find(id) == tasks.end()) {
+            throw std::runtime_error("Invalid task id");
         }
 
-        if(tasks[id].get()->has_value()) {
-            return any_cast<T>(tasks[id].get()->result());
-        }
-
-        auto stack = top_sort();
-
-        while(!stack.empty()) {
-            int next = stack.top();
-            tasks[next].get()->execute();
-
-            if(next == id) {
-                break;
+        {
+            std::lock_guard<std::mutex> lock(sched_mutex);
+            for (int i = 0; i < next_id; ++i) {
+                if (in_degree[i] == 0) {
+                    pool.EnqueueTask(std::make_shared<DependentTask>(i, this));
+                }
             }
-
-            stack.pop();
-            next = stack.top();
         }
 
-        return any_cast<T>(tasks[id].get()->result());
+        pool.WaitIdle();
+        return any_cast<T>(tasks[id]->result());
     }
 
-    void executeAll() {
-        auto stack = top_sort();
-
-        while(!stack.empty()) {
-            int next = stack.top();
-            tasks[next].get()->execute();
-
-            stack.pop();
-        }
-    }
+    void executeAll();
 };

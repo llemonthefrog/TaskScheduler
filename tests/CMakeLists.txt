@@ -22,8 +22,10 @@ add_executable(
 
 target_link_libraries(
     processing-lib-tests
-    GTest::gtest_main
-    GTest::gmock_main
+    PRIVATE
+        lib
+        GTest::gtest_main
+        GTest::gmock_main
 )
 
 target_include_directories(processing-lib-tests PUBLIC ${PROJECT_SOURCE_DIR})

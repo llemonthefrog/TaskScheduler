@@ -1,6 +1,8 @@
 #pragma once
 
 #include <memory>
+#include <stdexcept>
+#include <typeinfo>
 
 template<typename T>
 struct remove_reference {
@@ -97,14 +99,14 @@ public:
 
     size_t type() const {
         if (!holder_) {
-            throw "Accessing type of empty AnyType";
+            throw std::runtime_error("Accessing type of empty AnyType");
         }
         return holder_->type();
     }
 
     AnyType clone() const {
         if (!holder_) {
-            throw "Accessing clone of empty AnyType";
+            throw std::runtime_error("Accessing clone of empty AnyType");
         }
 
         AnyType cloned = *this;
@@ -118,7 +120,7 @@ public:
 template<typename T>
 T any_cast(const AnyType& any) {
     if(!any.has_value() || type_id<my_decay_t<T>>() != any.type()) {
-        throw "bad cast";
+        throw std::bad_cast("bad cast");
     }
 
     auto* ptr = dynamic_cast<AnyType::Holder<my_decay_t<T>>*>(any.holder_.get());
